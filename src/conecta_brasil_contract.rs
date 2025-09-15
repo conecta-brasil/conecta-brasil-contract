@@ -9,6 +9,33 @@ use soroban_sdk::{
 #[contract]
 pub struct ConectaBrasil;
 
+    // -------------------------------------------------------------
+    // HELPERS (tempo)
+    // -------------------------------------------------------------
+    fn remaining_at(_env: &Env, s: &Session, now: u64) -> u64 {
+        if s.started_at == 0 {
+            s.remaining_secs
+        } else {
+            s.remaining_secs
+                .saturating_sub(now.saturating_sub(s.started_at))
+        }
+    }
+
+    fn load_session(env: &Env, owner: &Address) -> Session {
+        env.storage()
+            .persistent()
+            .get::<_, Session>(&DataKey::Session(owner.clone()))
+            .unwrap_or(Session {
+                remaining_secs: 0,
+                started_at: 0,
+            })
+    }
+
+    fn save_session(env: &Env, owner: &Address, s: &Session) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Session(owner.clone()), s);
+    }
 
     // -------------------------------------------------------------
     // TIPOS AUXILIARES (somente neste arquivo)
@@ -50,7 +77,37 @@ pub struct ConectaBrasil;
         next
     }
 
+    // -------------------- FUNÇÕES HELPER PARA ORDER SESSION --------------------
+    fn load_order_session(env: &Env, owner: &Address, order_id: u128) -> OrderSession {
+        env.storage()
+            .persistent()
+            .get(&DataKey::OrderSession(owner.clone(), order_id))
+            .unwrap_or(OrderSession {
+                order_id,
+                remaining_secs: 0,
+                started_at: 0,
+            })
+    }
 
+    fn save_order_session(env: &Env, owner: &Address, order_id: u128, session: &OrderSession) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::OrderSession(owner.clone(), order_id), session);
+    }
+
+
+    // -------------------------------------------------------------
+    // EVENTOS
+    // -------------------------------------------------------------
+
+    fn emit_grant(env: &Env, owner: &Address, order_id: u128, new_remaining: u64) {
+        env.events()
+            .publish((symbol_short!("grant"), owner, order_id), new_remaining);
+    }
+    
+// -------------------------------------------------------------
+// CONTRATO
+// -------------------------------------------------------------
 #[contractimpl]
 impl ConectaBrasil {
     
@@ -189,6 +246,54 @@ impl ConectaBrasil {
         order_id
     }
 
+    // -------------------- NOVO: grant (owner OU admin) ------------------------
+    /// Credita os segundos do pacote na sessão do `owner` referentes à `order_id`.
+    /// Pode ser chamado pelo **owner** (self-serve) OU pelo **admin**.
+    /// - Idempotente: se já creditado, retorna erro `AlreadyGranted`.
+    pub fn grant(env: Env, caller: Address, owner: Address, order_id: u128) {
+        // autoriza: caller deve ser admin OU o próprio owner
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)
+            .unwrap();
+        if caller != admin && caller != owner {
+            panic_with_error!(&env, Error::Unauthorized);
+        }
+        caller.require_auth();
+
+        // busca ordem; precisa existir e não ter sido creditada
+        let mut ord = load_order(&env, &owner, order_id)
+            .ok_or(Error::OrderNotFound)
+            .unwrap();
+        if ord.credited {
+            panic_with_error!(&env, Error::AlreadyGranted);
+        }
+
+        // pega pacote vinculado à ordem
+        let pkg: Package = env
+            .storage()
+            .instance()
+            .get(&DataKey::Package(ord.package_id))
+            .ok_or(Error::PackageNotFound)
+            .unwrap();
+
+        // credita tempo na sessão geral (mantém compatibilidade)
+        let mut s = load_session(&env, &owner);
+        s.remaining_secs = s.remaining_secs.saturating_add(pkg.duration_secs as u64);
+        save_session(&env, &owner, &s);
+
+        // credita tempo na sessão específica da ordem
+        let mut order_session = load_order_session(&env, &owner, order_id);
+        order_session.remaining_secs = order_session.remaining_secs.saturating_add(pkg.duration_secs as u64);
+        save_order_session(&env, &owner, order_id, &order_session);
+
+        // marca como creditado e emite evento
+        ord.credited = true;
+        save_order(&env, &owner, order_id, &ord);
+        emit_grant(&env, &owner, order_id, s.remaining_secs);
+    }
 
 
 
