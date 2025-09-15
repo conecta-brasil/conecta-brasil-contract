@@ -44,5 +44,13 @@ impl ConectaBrasil {
             .publish((symbol_short!("pkg_set"), id), (price, duration_secs));
     }
 
+    // Add this function to the contract implementation
+    pub fn get_package(env: Env, package_id: u32) -> Package {
+        env.storage()
+            .instance()
+            .get(&DataKey::Package(package_id))
+            .unwrap_or_else(|| panic_with_error!(&env, Error::PackageNotFound))
+    }
+
 
 }
