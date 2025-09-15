@@ -90,6 +90,20 @@ impl ConectaBrasil {
         packages
     }
 
+    /// Retorna todos os pacotes cadastrados
+    pub fn get_all_packages(env: Env) -> Vec<(u32, Package)> {
+        let mut packages = Vec::new(&env);
+        
+        // Itera através de possíveis IDs de pacotes (máximo 10 pacotes)
+        for package_id in 1..=10u32 {
+            if let Some(package) = env.storage().instance().get(&DataKey::Package(package_id)) {
+                packages.push_back((package_id, package));
+            }
+        }
+        
+        packages
+    }
+
 
 
 
