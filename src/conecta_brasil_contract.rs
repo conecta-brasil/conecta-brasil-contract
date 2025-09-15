@@ -12,7 +12,7 @@ pub struct ConectaBrasil;
     // -------------------------------------------------------------
     // HELPERS (tempo)
     // -------------------------------------------------------------
-    fn remaining_at(_env: &Env, s: &Session, now: u64) -> u64 {
+    fn remaining_at(env: &Env, s: &Session, now: u64) -> u64 {
         if s.started_at == 0 {
             s.remaining_secs
         } else {
@@ -93,6 +93,15 @@ pub struct ConectaBrasil;
         env.storage()
             .persistent()
             .set(&DataKey::OrderSession(owner.clone(), order_id), session);
+    }
+
+    fn remaining_at_order(env: &Env, session: &OrderSession, now: u64) -> u64 {
+        if session.started_at == 0 {
+            session.remaining_secs
+        } else {
+            let elapsed = now.saturating_sub(session.started_at);
+            session.remaining_secs.saturating_sub(elapsed)
+        }
     }
 
 
@@ -295,6 +304,146 @@ impl ConectaBrasil {
         emit_grant(&env, &owner, order_id, s.remaining_secs);
     }
 
+    // -------------------- start / pause / getters (inalterados) ---------------
+    pub fn start(env: Env, owner: Address) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        let mut s = load_session(&env, &owner);
+        if remaining_at(&env, &s, now) == 0 {
+            return;
+        }
+        if s.started_at == 0 {
+            s.started_at = now;
+            save_session(&env, &owner, &s);
+            env.events().publish((symbol_short!("start"), owner), now);
+        }
+    }
 
+    pub fn pause(env: Env, owner: Address) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        let mut s = load_session(&env, &owner);
+        if s.started_at > 0 {
+            let gasto = now.saturating_sub(s.started_at);
+            s.remaining_secs = s.remaining_secs.saturating_sub(gasto);
+            s.started_at = 0;
+            save_session(&env, &owner, &s);
+            env.events()
+                .publish((symbol_short!("pause"), owner), s.remaining_secs);
+        }
+    }
+
+     /// Inicia uma sessão específica por order_id
+    pub fn start_order(env: Env, owner: Address, order_id: u128) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        
+        // Verifica se a ordem existe e foi creditada
+        let order = load_order(&env, &owner, order_id)
+            .ok_or(Error::OrderNotFound)
+            .unwrap();
+        if !order.credited {
+            panic_with_error!(&env, Error::AlreadyGranted);
+        }
+        
+        // Carrega a sessão da ordem
+        let mut order_session = load_order_session(&env, &owner, order_id);
+        
+        // Verifica se há tempo restante
+        if remaining_at_order(&env, &order_session, now) == 0 {
+            return;
+        }
+        
+        // Inicia a sessão se não estiver ativa
+        if order_session.started_at == 0 {
+            order_session.started_at = now;
+            save_order_session(&env, &owner, order_id, &order_session);
+            env.events().publish(
+                (Symbol::new(&env, "start_order"), owner),
+                (order_id, now)
+            );
+        }
+    }
+
+    /// Pausa uma sessão específica por order_id
+    pub fn pause_order(env: Env, owner: Address, order_id: u128) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        
+        // Carrega a sessão da ordem
+        let mut order_session = load_order_session(&env, &owner, order_id);
+        
+        // Pausa apenas se estiver ativa
+        if order_session.started_at > 0 {
+            let elapsed = now.saturating_sub(order_session.started_at);
+            order_session.remaining_secs = order_session.remaining_secs.saturating_sub(elapsed);
+            order_session.started_at = 0;
+            save_order_session(&env, &owner, order_id, &order_session);
+            env.events().publish(
+                (Symbol::new(&env, "pause_order"), owner),
+                (order_id, order_session.remaining_secs)
+            );
+        }
+    }
+
+        /// Retorna a sessão específica de uma ordem
+    pub fn get_order_session(env: Env, owner: Address, order_id: u128) -> OrderSession {
+        load_order_session(&env, &owner, order_id)
+    }
+
+    /// Retorna o tempo restante de uma ordem específica
+    pub fn remaining_by_order(env: Env, owner: Address, order_id: u128, now: u64) -> u64 {
+        let order_session = load_order_session(&env, &owner, order_id);
+        remaining_at_order(&env, &order_session, now)
+    }
+
+    /// Verifica se uma ordem específica está ativa
+    pub fn is_order_active(env: Env, owner: Address, order_id: u128, now: u64) -> bool {
+        let order_session = load_order_session(&env, &owner, order_id);
+        order_session.started_at > 0 && remaining_at_order(&env, &order_session, now) > 0
+    }
+
+    /// Retorna lista de ordens ativas do usuário
+    pub fn get_active_orders(env: Env, owner: Address, now: u64) -> Vec<u128> {
+        let orders = get_user_orders_list(&env, &owner);
+        let mut active_orders = Vec::new(&env);
+        
+        for order_id in orders.iter() {
+            let order_session = load_order_session(&env, &owner, order_id);
+            if order_session.started_at > 0 && remaining_at_order(&env, &order_session, now) > 0 {
+                active_orders.push_back(order_id);
+            }
+        }
+        
+        active_orders
+    }
+
+    pub fn get_session(env: Env, owner: Address) -> Session {
+        load_session(&env, &owner)
+    }
+
+    pub fn get_access(env: Env, owner: Address) -> Access {
+        let s = load_session(&env, &owner);
+        let ea = if s.started_at > 0 {
+            s.started_at.saturating_add(s.remaining_secs)
+        } else {
+            0
+        };
+        Access {
+            owner,
+            expires_at: ea,
+        }
+    }
+
+
+    pub fn is_active(env: Env, owner: Address, now: u64) -> bool {
+        let s = load_session(&env, &owner);
+        s.started_at > 0 && remaining_at(&env, &s, now) > 0
+    }
+
+    pub fn remaining(env: Env, owner: Address, now: u64) -> u64 {
+        let s = load_session(&env, &owner);
+        remaining_at(&env, &s, now)
+    }
 
 }
