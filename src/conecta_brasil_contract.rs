@@ -386,6 +386,38 @@ impl ConectaBrasil {
         }
     }
 
+        /// Retorna a sessão específica de uma ordem
+    pub fn get_order_session(env: Env, owner: Address, order_id: u128) -> OrderSession {
+        load_order_session(&env, &owner, order_id)
+    }
+
+    /// Retorna o tempo restante de uma ordem específica
+    pub fn remaining_by_order(env: Env, owner: Address, order_id: u128, now: u64) -> u64 {
+        let order_session = load_order_session(&env, &owner, order_id);
+        remaining_at_order(&env, &order_session, now)
+    }
+
+    /// Verifica se uma ordem específica está ativa
+    pub fn is_order_active(env: Env, owner: Address, order_id: u128, now: u64) -> bool {
+        let order_session = load_order_session(&env, &owner, order_id);
+        order_session.started_at > 0 && remaining_at_order(&env, &order_session, now) > 0
+    }
+
+    /// Retorna lista de ordens ativas do usuário
+    pub fn get_active_orders(env: Env, owner: Address, now: u64) -> Vec<u128> {
+        let orders = get_user_orders_list(&env, &owner);
+        let mut active_orders = Vec::new(&env);
+        
+        for order_id in orders.iter() {
+            let order_session = load_order_session(&env, &owner, order_id);
+            if order_session.started_at > 0 && remaining_at_order(&env, &order_session, now) > 0 {
+                active_orders.push_back(order_id);
+            }
+        }
+        
+        active_orders
+    }
+
     
 
 
