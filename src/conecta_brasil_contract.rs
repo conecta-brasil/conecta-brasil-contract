@@ -295,6 +295,34 @@ impl ConectaBrasil {
         emit_grant(&env, &owner, order_id, s.remaining_secs);
     }
 
+    // -------------------- start / pause / getters (inalterados) ---------------
+    pub fn start(env: Env, owner: Address) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        let mut s = load_session(&env, &owner);
+        if remaining_at(&env, &s, now) == 0 {
+            return;
+        }
+        if s.started_at == 0 {
+            s.started_at = now;
+            save_session(&env, &owner, &s);
+            env.events().publish((symbol_short!("start"), owner), now);
+        }
+    }
+
+    pub fn pause(env: Env, owner: Address) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        let mut s = load_session(&env, &owner);
+        if s.started_at > 0 {
+            let gasto = now.saturating_sub(s.started_at);
+            s.remaining_secs = s.remaining_secs.saturating_sub(gasto);
+            s.started_at = 0;
+            save_session(&env, &owner, &s);
+            env.events()
+                .publish((symbol_short!("pause"), owner), s.remaining_secs);
+        }
+    }
 
 
 }
