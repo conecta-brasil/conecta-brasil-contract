@@ -12,7 +12,7 @@ pub struct ConectaBrasil;
     // -------------------------------------------------------------
     // HELPERS (tempo)
     // -------------------------------------------------------------
-    fn remaining_at(_env: &Env, s: &Session, now: u64) -> u64 {
+    fn remaining_at(env: &Env, s: &Session, now: u64) -> u64 {
         if s.started_at == 0 {
             s.remaining_secs
         } else {
@@ -93,6 +93,15 @@ pub struct ConectaBrasil;
         env.storage()
             .persistent()
             .set(&DataKey::OrderSession(owner.clone(), order_id), session);
+    }
+
+    fn remaining_at_order(env: &Env, session: &OrderSession, now: u64) -> u64 {
+        if session.started_at == 0 {
+            session.remaining_secs
+        } else {
+            let elapsed = now.saturating_sub(session.started_at);
+            session.remaining_secs.saturating_sub(elapsed)
+        }
     }
 
 
@@ -323,6 +332,61 @@ impl ConectaBrasil {
                 .publish((symbol_short!("pause"), owner), s.remaining_secs);
         }
     }
+
+     /// Inicia uma sessão específica por order_id
+    pub fn start_order(env: Env, owner: Address, order_id: u128) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        
+        // Verifica se a ordem existe e foi creditada
+        let order = load_order(&env, &owner, order_id)
+            .ok_or(Error::OrderNotFound)
+            .unwrap();
+        if !order.credited {
+            panic_with_error!(&env, Error::AlreadyGranted);
+        }
+        
+        // Carrega a sessão da ordem
+        let mut order_session = load_order_session(&env, &owner, order_id);
+        
+        // Verifica se há tempo restante
+        if remaining_at_order(&env, &order_session, now) == 0 {
+            return;
+        }
+        
+        // Inicia a sessão se não estiver ativa
+        if order_session.started_at == 0 {
+            order_session.started_at = now;
+            save_order_session(&env, &owner, order_id, &order_session);
+            env.events().publish(
+                (Symbol::new(&env, "start_order"), owner),
+                (order_id, now)
+            );
+        }
+    }
+
+    /// Pausa uma sessão específica por order_id
+    pub fn pause_order(env: Env, owner: Address, order_id: u128) {
+        owner.require_auth();
+        let now = env.ledger().timestamp();
+        
+        // Carrega a sessão da ordem
+        let mut order_session = load_order_session(&env, &owner, order_id);
+        
+        // Pausa apenas se estiver ativa
+        if order_session.started_at > 0 {
+            let elapsed = now.saturating_sub(order_session.started_at);
+            order_session.remaining_secs = order_session.remaining_secs.saturating_sub(elapsed);
+            order_session.started_at = 0;
+            save_order_session(&env, &owner, order_id, &order_session);
+            env.events().publish(
+                (Symbol::new(&env, "pause_order"), owner),
+                (order_id, order_session.remaining_secs)
+            );
+        }
+    }
+
+    
 
 
 }
