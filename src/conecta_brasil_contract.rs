@@ -418,7 +418,32 @@ impl ConectaBrasil {
         active_orders
     }
 
-    
+    pub fn get_session(env: Env, owner: Address) -> Session {
+        load_session(&env, &owner)
+    }
 
+    pub fn get_access(env: Env, owner: Address) -> Access {
+        let s = load_session(&env, &owner);
+        let ea = if s.started_at > 0 {
+            s.started_at.saturating_add(s.remaining_secs)
+        } else {
+            0
+        };
+        Access {
+            owner,
+            expires_at: ea,
+        }
+    }
+
+
+    pub fn is_active(env: Env, owner: Address, now: u64) -> bool {
+        let s = load_session(&env, &owner);
+        s.started_at > 0 && remaining_at(&env, &s, now) > 0
+    }
+
+    pub fn remaining(env: Env, owner: Address, now: u64) -> u64 {
+        let s = load_session(&env, &owner);
+        remaining_at(&env, &s, now)
+    }
 
 }
