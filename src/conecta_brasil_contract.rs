@@ -23,6 +23,26 @@ impl ConectaBrasil {
         env.events()
             .publish((symbol_short!("init"), admin.clone()), token_asset);
     }
-    
+
+        pub fn set_package(env: Env, id: u32, price: i128, duration_secs: u32, name: Symbol, speed_message: Symbol, is_popular: bool) {
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)
+            .unwrap();
+        admin.require_auth();
+        let pkg = Package {
+            price,
+            duration_secs,
+            name,
+            speed_message,
+            is_popular,
+        };
+        env.storage().instance().set(&DataKey::Package(id), &pkg);
+        env.events()
+            .publish((symbol_short!("pkg_set"), id), (price, duration_secs));
+    }
+
 
 }
