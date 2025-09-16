@@ -255,6 +255,83 @@ impl ConectaBrasil {
         order_id
     }
 
+    /// Compra e credita o pacote em uma única transação assinada pelo cliente
+    /// Unifica buy_order + grant para melhor UX (uma única assinatura)
+    pub fn buy_and_grant(env: Env, owner: Address, package_id: u32) -> u128 {
+        owner.require_auth();
+        Self::dbg(&env, "buy_grant_start");
+
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| {
+                Self::dbg(&env, "err_no_admin");
+                panic_with_error!(&env, Error::NotInitialized)
+            });
+
+        let token_id: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .unwrap_or_else(|| {
+                Self::dbg(&env, "err_no_token");
+                panic_with_error!(&env, Error::NotInitialized)
+            });
+
+        let pkg: Package = env
+            .storage()
+            .instance()
+            .get(&DataKey::Package(package_id))
+            .unwrap_or_else(|| {
+                Self::dbg(&env, "err_pkg_nf");
+                panic_with_error!(&env, Error::PackageNotFound)
+            });
+
+        // 1. Transferir pagamento
+        Self::dbg(&env, "before_transfer");
+        let token = TokenClient::new(&env, &token_id);
+        token.transfer(&owner, &admin, &pkg.price);
+        Self::dbg(&env, "after_transfer");
+
+        // 2. Criar ordem
+        let order_id: u128 = next_order_id(&env, &owner);
+        
+        // 3. Salvar ordem já creditada
+        save_order(
+            &env,
+            &owner,
+            order_id,
+            &OrderRec {
+                package_id,
+                credited: true, // ← JÁ CREDITADO!
+            },
+        );
+
+        // 4. Adicionar à lista do usuário
+        add_user_order(&env, &owner, order_id);
+
+        // 5. Creditar tempo na sessão geral (compatibilidade)
+        let mut s = load_session(&env, &owner);
+        s.remaining_secs = s.remaining_secs.saturating_add(pkg.duration_secs as u64);
+        save_session(&env, &owner, &s);
+
+        // 6. Creditar tempo na sessão específica da ordem
+        let mut order_session = load_order_session(&env, &owner, order_id);
+        order_session.remaining_secs = order_session.remaining_secs.saturating_add(pkg.duration_secs as u64);
+        save_order_session(&env, &owner, order_id, &order_session);
+
+        // 7. Emitir eventos
+        env.events().publish(
+            (Symbol::new(&env, "purchase"), Symbol::new(&env, "completed")),
+            (owner.clone(), package_id, order_id, pkg.price),
+        );
+        emit_grant(&env, &owner, order_id, s.remaining_secs);
+        
+        Self::dbg(&env, "buy_grant_done");
+        order_id
+    }
+
     // -------------------- NOVO: grant (owner OU admin) ------------------------
     /// Credita os segundos do pacote na sessão do `owner` referentes à `order_id`.
     /// Pode ser chamado pelo **owner** (self-serve) OU pelo **admin**.
