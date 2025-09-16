@@ -1,113 +1,320 @@
-🌐 ConectaBrasil — Soroban Smart Contract
+# 🌐 ConectaBrasil Smart Contract
 
-Blockchain contract for managing prepaid internet access orders, user sessions, and time credits using the Stellar network and Soroban.
+A blockchain-based prepaid internet access management system built on the Stellar network using Soroban smart contracts. This project enables users to purchase internet packages, manage time credits, and control session access through decentralized infrastructure.
 
-⚙️ Setup
-1. Install dependencies
+## 🚀 Project Overview
 
-Rust 
+ConectaBrasil is a decentralized solution for managing prepaid internet access that leverages blockchain technology to provide:
 
-Soroban SDK
+- **Transparent Pricing**: All package prices and durations are stored on-chain
+- **Decentralized Access Control**: Session management without centralized servers
+- **Flexible Payment**: Support for various Stellar tokens (XLM, USDC, etc.)
+- **Time Credit Management**: Pause/resume functionality for internet sessions
+- **Order Tracking**: Complete history of purchases and usage
 
+## 🛠️ Technologies
+
+- **Blockchain**: Stellar Network
+- **Smart Contracts**: Soroban SDK v22
+- **Language**: Rust (Edition 2024)
+- **Target**: WebAssembly (WASM)
+- **Network**: Stellar Testnet (deployed)
+
+## 🏗️ Architecture
+
+### Core Components
+
+1. **Package Management**: Define internet packages with price, duration, speed, and popularity
+2. **Order System**: Two-phase purchase system (buy → grant) for better reliability
+3. **Session Control**: Start/pause internet sessions with time tracking
+4. **Multi-Order Support**: Users can have multiple active packages simultaneously
+5. **Event System**: On-chain events for external integrations
+
+### Data Models
+
+```rust
+// Internet Package
+struct Package {
+    price: i128,           // Price in token units (stroops)
+    duration_secs: u32,    // Package duration in seconds
+    name: Symbol,          // Package name ("Basic", "Premium")
+    speed_message: Symbol, // Speed description ("Up to 100 Mbps")
+    is_popular: bool,      // Popular package flag
+}
+
+// User Session
+struct Session {
+    remaining_secs: u64,   // Available time credits
+    started_at: u64,       // Session start timestamp (0 = paused)
+}
+
+// Order Record
+struct OrderRec {
+    package_id: u32,       // Purchased package ID
+    credited: bool,        // Whether credits were applied
+}
+```
+
+### Storage Architecture
+
+- **Instance Storage**: Global configuration (admin, token, packages)
+- **Persistent Storage**: User sessions, orders, and order sessions
+- **Deterministic IDs**: Sequential order IDs per user
+
+## 📦 Installation & Setup
+
+### Prerequisites
+
+```bash
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install Soroban CLI
 cargo install --locked soroban-cli
 
-2. Clone the repository
+# Add WebAssembly target
+rustup target add wasm32-unknown-unknown
+```
+
+### Build Contract
+
+```bash
+# Clone repository
 git clone <repo-url>
 cd conecta-brasil-contract
 
-3. Build the contract
+# Build for deployment
 cargo build --target wasm32-unknown-unknown --release
 
+# Optimize (optional)
+soroban contract optimize --wasm target/wasm32-unknown-unknown/release/conecta_brasil_contract.wasm
+```
 
-📂 The compiled file will be located at:
-target/wasm32-unknown-unknown/release/
+Compiled files location: `target/wasm32-unknown-unknown/release/`
 
-🚀 Deployment
-1. Configure wallet (testnet/futurenet recommended)
-soroban wallet import <YOUR_SECRET_KEY> --testnet futurenet
+## 🚀 Deployment
 
-2. Deploy contract
+### Testnet Deployment
+
+```bash
+# Configure network
+soroban network add testnet \
+  --rpc-url https://soroban-testnet.stellar.org:443 \
+  --network-passphrase "Test SDF Network ; September 2015"
+
+# Deploy contract
 soroban contract deploy \
-  target/wasm32-unknown-unknown/release/conecta_brasil.wasm \
-  --testnet futurenet
+  --wasm target/wasm32-unknown-unknown/release/conecta_brasil_contract.wasm \
+  --network testnet \
+  --source <YOUR_SECRET_KEY>
+```
 
+### Live Testnet Contract
 
-✅ Save the contract ID returned.
+**Contract Address**: `CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ`
 
-3. Fund contract (testnet)
+🔗 **Explorer**: [View on StellarExpert](https://stellar.expert/explorer/testnet/contract/CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ?filter=history)
 
-Transfer test XLM to your contract's public key to enable operations.
+## 📖 Usage Examples
 
-📦 Usage Examples
-🔑 Initialize Contract
+### Initialize Contract
+
+```bash
 soroban contract invoke \
-  --id <CONTRACT_ID> \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --source <ADMIN_SECRET> \
   --fn init \
   -- \
-  <ADMIN_ADDRESS> <TOKEN_ADDRESS>
+  --admin <ADMIN_ADDRESS> \
+  --token_asset <TOKEN_CONTRACT_ADDRESS>
+```
 
-📡 Set Package
+### Create Internet Package
+
+```bash
+# Create a 1-hour, 100 Mbps package for 20 XLM
 soroban contract invoke \
-  --id <CONTRACT_ID> \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --source <ADMIN_SECRET> \
   --fn set_package \
   -- \
-  <PACKAGE_ID> <PRICE> <DURATION_SECS> <NAME> <SPEED_MSG> <IS_POPULAR>
+  --id 1 \
+  --price 200000000 \
+  --duration_secs 3600 \
+  --name "1_Hour" \
+  --speed_message "100_Mbps" \
+  --is_popular false
+```
 
-🛒 Buy Order
+### Purchase Internet Package
+
+```bash
+# Buy package (creates order)
 soroban contract invoke \
-  --id <CONTRACT_ID> \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --source <USER_SECRET> \
   --fn buy_order \
   -- \
-  <OWNER_ADDRESS> <PACKAGE_ID>
+  --owner <USER_ADDRESS> \
+  --package_id 1
 
-🎟️ Grant Access/Session
+# Grant access (applies credits)
 soroban contract invoke \
-  --id <CONTRACT_ID> \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --source <USER_SECRET> \
   --fn grant \
   -- \
-  <CALLER_ADDRESS> <OWNER_ADDRESS> <ORDER_ID>
+  --caller <USER_ADDRESS> \
+  --owner <USER_ADDRESS> \
+  --order_id <ORDER_ID>
+```
 
-📢 Events
+### Session Management
 
-Soroban contracts emit on-chain events for logging and off-chain triggers.
+```bash
+# Start internet session
+soroban contract invoke \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --source <USER_SECRET> \
+  --fn start_order \
+  -- \
+  --owner <USER_ADDRESS> \
+  --order_id <ORDER_ID>
 
-🔹 Package Set
-env.events().publish((symbol_short!("pkg_set"), id), (price, duration_secs));
+# Pause session
+soroban contract invoke \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --source <USER_SECRET> \
+  --fn pause_order \
+  -- \
+  --owner <USER_ADDRESS> \
+  --order_id <ORDER_ID>
+```
 
-🔹 Purchase Created
-env.events().publish(
-  (Symbol::new(&env, "purchase"), Symbol::new(&env, "created")),
-  (owner, package_id, order_id, pkg.price)
-);
+### Query Functions
 
-🔹 Grant
-env.events().publish((symbol_short!("grant"), owner, order_id), new_remaining);
+```bash
+# Get user packages with remaining time
+soroban contract invoke \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --fn get_user_packages_with_time \
+  -- \
+  --owner <USER_ADDRESS> \
+  --now $(date +%s)
 
-🔹 Session Lifecycle
-env.events().publish((symbol_short!("start"), owner), now);
-env.events().publish((symbol_short!("pause"), owner), s.remaining_secs);
+# Check remaining time for specific order
+soroban contract invoke \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --fn remaining_by_order \
+  -- \
+  --owner <USER_ADDRESS> \
+  --order_id <ORDER_ID> \
+  --now $(date +%s)
 
-🔹 Debug
-env.events().publish((Symbol::new(env, "dbg"), Symbol::new(env, step)), ());
+# Get all available packages
+soroban contract invoke \
+  --id CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ \
+  --network testnet \
+  --fn get_all_packages
+```
 
-📝 Example Event Data
+## 📡 Events
 
-Grant event:
+The contract emits events for external monitoring and integration:
 
+### Package Events
+```json
 {
-  "event": {
-    "topics": ["grant", "<OWNER>", "<ORDER_ID>"],
-    "data": <NEW_REMAINING_SECS>
-  }
+  "topics": ["pkg_set", "<PACKAGE_ID>"],
+  "data": ["<PRICE>", "<DURATION_SECS>"]
+}
+```
+
+### Purchase Events
+```json
+{
+  "topics": ["purchase", "created"],
+  "data": ["<OWNER>", "<PACKAGE_ID>", "<ORDER_ID>", "<PRICE>"]
+}
+```
+
+### Session Events
+```json
+// Grant access
+{
+  "topics": ["grant", "<OWNER>", "<ORDER_ID>"],
+  "data": "<NEW_REMAINING_SECS>"
 }
 
-
-Purchase event:
-
+// Start session
 {
-  "event": {
-    "topics": ["purchase", "created"],
-    "data": ["<OWNER>", "<PACKAGE_ID>", "<ORDER_ID>", "<PRICE>"]
-  }
+  "topics": ["start", "<OWNER>"],
+  "data": "<TIMESTAMP>"
 }
 
+// Pause session
+{
+  "topics": ["pause", "<OWNER>"],
+  "data": "<REMAINING_SECS>"
+}
+```
+
+## 🔧 Key Features
+
+### Multi-Order Support
+- Users can purchase multiple packages simultaneously
+- Each order has independent session management
+- Flexible time credit allocation
+
+### Two-Phase Purchase System
+1. **Buy Order**: Creates order record and processes payment
+2. **Grant Access**: Applies time credits to user session
+
+This separation ensures payment reliability and prevents double-spending.
+
+### Session Control
+- **Start/Pause**: Fine-grained control over internet access
+- **Time Tracking**: Accurate consumption measurement
+- **Remaining Time**: Real-time credit balance queries
+
+### Administrative Functions
+- Package management (create, update pricing)
+- Access control (admin-only functions)
+- Event monitoring for external systems
+
+## 🧪 Testing
+
+```bash
+# Run unit tests
+cargo test
+
+# Test with Soroban testutils
+cargo test -- --nocapture
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🔗 Links
+
+- **Testnet Contract**: [CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ](https://stellar.expert/explorer/testnet/contract/CBZJGDBEDAXHWRAVE6YVZYO7SWAMTWT7SEGR7KDR3FMGS3YVUAEPLPKQ?filter=history)
+- **Stellar Network**: [stellar.org](https://stellar.org)
+- **Soroban Documentation**: [soroban.stellar.org](https://soroban.stellar.org)
+- **Rust Documentation**: [doc.rust-lang.org](https://doc.rust-lang.org)
